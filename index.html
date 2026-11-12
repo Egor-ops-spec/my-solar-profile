@@ -1,42 +1,426 @@
-<h1>Мой первый сайт</h1>
-<p>Попытка номер 1.</p>
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Universe Sandbox: Симулятор Вселенной</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
 
-<style>
     body {
-        background-color: #1e1e2e;
-        color: white;
-        font-family: sans-serif;
-        text-align: center;
-        padding-top: 50px;
+      background-color: #040409;
+      color: #ffffff;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    canvas {
+      display: block;
+    }
+
+    .ui-panel {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      background: rgba(12, 16, 28, 0.8);
+      backdrop-filter: blur(10px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 14px;
+      padding: 16px 20px;
+      z-index: 10;
+      max-width: 340px;
     }
 
     h1 {
-        color: #FFAAAA;
-        font-size: 40px;
+      font-size: 16px;
+      color: #8be9fd;
+      margin-bottom: 8px;
+      letter-spacing: 0.5px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .zoom-badge {
+      font-size: 12px;
+      background: rgba(139, 233, 253, 0.15);
+      padding: 2px 8px;
+      border-radius: 6px;
+      color: #8be9fd;
     }
 
     p {
-        font-size: 20px;
+      font-size: 12.5px;
+      color: #b0b8c4;
+      line-height: 1.45;
+      margin-bottom: 14px;
     }
 
-    a {
-        color: #8be9fd;
-        font-size: 18px;
-        text-decoration: none;
-        display: inline-block;
-        margin-top: 20px;
-        margin-right: 15px; /* Отступ между ссылками, чтобы они не слипались */
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 7px;
     }
-</style>
 
-<img src="Рецепты.jpeg" alt="Код" width="500">
-<br>
+    button {
+      background: rgba(139, 233, 253, 0.12);
+      border: 1px solid rgba(139, 233, 253, 0.5);
+      color: #8be9fd;
+      padding: 7px 11px;
+      border-radius: 8px;
+      font-size: 12.5px;
+      cursor: pointer;
+      transition: 0.2s;
+    }
 
-<!-- Ссылки теперь находятся снаружи стилей и выстроится в ряд -->
-<div>
-    <a href="https://www.russianfood.com/recipes/bytype/?fid=1316" target="_blank">Рецепт 1</a>
-    <a href="https://www.russianfood.com/recipes/bytype/?fid=504" target="_blank">Рецепт 2</a>
-</div>
+    button:hover {
+      background: #8be9fd;
+      color: #040409;
+    }
 
+    button.active {
+      background: #ffb86c;
+      border-color: #ffb86c;
+      color: #040409;
+      font-weight: bold;
+    }
 
+    button.blackhole.active {
+      background: #bd93f9;
+      border-color: #bd93f9;
+      color: #040409;
+    }
+  </style>
+</head>
+<body>
 
+  <div class="ui-panel">
+    <h1>
+      ВСЕЛЕННАЯ
+      <span class="zoom-badge" id="zoomLabel">Масштаб: 100%</span>
+    </h1>
+    <p>
+      <b>ЛКМ (тянуть):</b> запустить объект<br>
+      <b>Колёсико:</b> масштаб вселенной<br>
+      <b>ПКМ (тянуть):</b> полёт камеры
+    </p>
+    <div class="controls">
+      <button id="modePlanet" class="active" onclick="setMode('planet')">Планета</button>
+      <button id="modeStar" onclick="setMode('star')">Звезда</button>
+      <button id="modeBH" class="blackhole" onclick="setMode('blackhole')">Чёрная дыра</button>
+      <button onclick="resetCamera()">Центр</button>
+      <button onclick="clearSpace()">Очистить</button>
+    </div>
+  </div>
+
+  <canvas id="space"></canvas>
+
+  <script>
+    const canvas = document.getElementById('space');
+    const ctx = canvas.getContext('2d');
+
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // Отключаем стандартное меню по правой кнопке мыши
+    canvas.addEventListener('contextmenu', e => e.preventDefault());
+
+    const G = 0.45;
+    let bodies = [];
+    let bgStars = [];
+    let spawnMode = 'planet';
+
+    // Настройки камеры и масштаба
+    let camera = {
+      x: 0,
+      y: 0,
+      zoom: 1
+    };
+
+    let isDraggingSpawn = false;
+    let isPanning = false;
+    let dragStartWorld = { x: 0, y: 0 };
+    let dragCurrentWorld = { x: 0, y: 0 };
+    let panStartScreen = { x: 0, y: 0 };
+
+    const colors = ['#8be9fd', '#ff79c6', '#50fa7b', '#f1fa8c', '#ff5555'];
+
+    // Перевод координат экрана в координаты Вселенной
+    function screenToWorld(sx, sy) {
+      return {
+        x: (sx - canvas.width / 2) / camera.zoom + camera.x,
+        y: (sy - canvas.height / 2) / camera.zoom + camera.y
+      };
+    }
+
+    // Создаём фоновые далёкие звёзды
+    function generateBgStars() {
+      bgStars = [];
+      for (let i = 0; i < 250; i++) {
+        bgStars.push({
+          x: Math.random() * canvas.width,
+          y: Math.random() * canvas.height,
+          size: Math.random() * 1.5 + 0.5,
+          alpha: Math.random() * 0.6 + 0.2
+        });
+      }
+    }
+
+    class Body {
+      constructor(x, y, vx, vy, mass, radius, color, type = 'planet') {
+        this.x = x;
+        this.y = y;
+        this.vx = vx;
+        this.vy = vy;
+        this.mass = mass;
+        this.radius = radius;
+        this.color = color;
+        this.type = type; // 'planet', 'star', 'blackhole'
+        this.trail = [];
+      }
+
+      draw() {
+        // След орбиты
+        if (this.trail.length > 1) {
+          ctx.beginPath();
+          ctx.moveTo(this.trail[0].x, this.trail[0].y);
+          for (let i = 1; i < this.trail.length; i++) {
+            ctx.lineTo(this.trail[i].x, this.trail[i].y);
+          }
+          ctx.strokeStyle = this.type === 'blackhole' ? '#bd93f9' : this.color;
+          ctx.globalAlpha = 0.25;
+          ctx.lineWidth = Math.max(1 / camera.zoom, this.radius * 0.35);
+          ctx.stroke();
+          ctx.globalAlpha = 1.0;
+        }
+
+        // Отрисовка самого объекта
+        ctx.beginPath();
+        ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+
+        if (this.type === 'blackhole') {
+          ctx.fillStyle = '#000000';
+          ctx.shadowBlur = 25;
+          ctx.shadowColor = '#bd93f9';
+          ctx.fill();
+          ctx.lineWidth = 2.5 / camera.zoom;
+          ctx.strokeStyle = '#bd93f9';
+          ctx.stroke();
+        } else {
+          ctx.fillStyle = this.color;
+          ctx.shadowBlur = this.type === 'star' ? 35 : 12;
+          ctx.shadowColor = this.color;
+          ctx.fill();
+        }
+        ctx.shadowBlur = 0;
+      }
+
+      update() {
+        this.trail.push({ x: this.x, y: this.y });
+        if (this.trail.length > 55) {
+          this.trail.shift();
+        }
+        this.x += this.vx;
+        this.y += this.vy;
+      }
+    }
+
+    function initSystem() {
+      bodies = [];
+      // Центральная звезда
+      bodies.push(new Body(0, 0, 0, 0, 2200, 24, '#ffb86c', 'star'));
+      // Несколько планет на разных орбитах
+      bodies.push(new Body(170, 0, 0, 2.35, 15, 6, '#8be9fd', 'planet'));
+      bodies.push(new Body(-310, 0, 0, -1.75, 28, 9, '#ff79c6', 'planet'));
+      bodies.push(new Body(0, 520, -1.35, 0, 40, 11, '#50fa7b', 'planet'));
+    }
+
+    function setMode(mode) {
+      spawnMode = mode;
+      document.getElementById('modePlanet').classList.toggle('active', mode === 'planet');
+      document.getElementById('modeStar').classList.toggle('active', mode === 'star');
+      document.getElementById('modeBH').classList.toggle('active', mode === 'blackhole');
+    }
+
+    function resetCamera() {
+      camera.x = 0;
+      camera.y = 0;
+      camera.zoom = 1;
+      updateZoomLabel();
+    }
+
+    function clearSpace() {
+      bodies = [];
+    }
+
+    function updateZoomLabel() {
+      document.getElementById('zoomLabel').textContent = `Масштаб: ${Math.round(camera.zoom * 100)}%`;
+    }
+
+    // Масштабирование колёсиком мыши
+    canvas.addEventListener('wheel', (e) => {
+      e.preventDefault();
+      const zoomFactor = 1.12;
+      if (e.deltaY < 0) {
+        camera.zoom = Math.min(camera.zoom * zoomFactor, 5); // Макс. приближение 500%
+      } else {
+        camera.zoom = Math.max(camera.zoom / zoomFactor, 0.08); // Макс. отдаление 8%
+      }
+      updateZoomLabel();
+    }, { passive: false });
+
+    // Нажатие кнопок мыши
+    canvas.addEventListener('mousedown', (e) => {
+      if (e.button === 0) {
+        // Левая кнопка: запуск объекта
+        isDraggingSpawn = true;
+        dragStartWorld = screenToWorld(e.clientX, e.clientY);
+        dragCurrentWorld = { ...dragStartWorld };
+      } else if (e.button === 2 || e.button === 1) {
+        // Правая или средняя кнопка: перемещение камеры
+        isPanning = true;
+        panStartScreen = { x: e.clientX, y: e.clientY };
+      }
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+      if (isDraggingSpawn) {
+        dragCurrentWorld = screenToWorld(e.clientX, e.clientY);
+      }
+      if (isPanning) {
+        const dx = (e.clientX - panStartScreen.x) / camera.zoom;
+        const dy = (e.clientY - panStartScreen.y) / camera.zoom;
+        camera.x -= dx;
+        camera.y -= dy;
+        panStartScreen = { x: e.clientX, y: e.clientY };
+      }
+    });
+
+    canvas.addEventListener('mouseup', (e) => {
+      if (e.button === 0 && isDraggingSpawn) {
+        isDraggingSpawn = false;
+        const vx = (dragStartWorld.x - dragCurrentWorld.x) * 0.035;
+        const vy = (dragStartWorld.y - dragCurrentWorld.y) * 0.035;
+
+        if (spawnMode === 'blackhole') {
+          bodies.push(new Body(dragStartWorld.x, dragStartWorld.y, vx, vy, 9000, 18, '#bd93f9', 'blackhole'));
+        } else if (spawnMode === 'star') {
+          bodies.push(new Body(dragStartWorld.x, dragStartWorld.y, vx, vy, 2200, 24, '#ffb86c', 'star'));
+        } else {
+          const randomColor = colors[Math.floor(Math.random() * colors.length)];
+          const radius = Math.random() * 4 + 5;
+          bodies.push(new Body(dragStartWorld.x, dragStartWorld.y, vx, vy, radius * 2.5, radius, randomColor, 'planet'));
+        }
+      }
+      if (e.button === 2 || e.button === 1) {
+        isPanning = false;
+      }
+    });
+
+    function animate() {
+      // Очистка фона
+      ctx.fillStyle = '#040409';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Рисуем фоновые звёзды (не зависят от зума, создают глубину)
+      for (let s of bgStars) {
+        ctx.fillStyle = `rgba(255, 255, 255, ${s.alpha})`;
+        ctx.fillRect(s.x, s.y, s.size, s.size);
+      }
+
+      // Применяем трансформацию камеры (позиция + масштаб)
+      ctx.save();
+      ctx.translate(canvas.width / 2, canvas.height / 2);
+      ctx.scale(camera.zoom, camera.zoom);
+      ctx.translate(-camera.x, -camera.y);
+
+      // Расчёт гравитации и столкновений
+      for (let i = 0; i < bodies.length; i++) {
+        for (let j = i + 1; j < bodies.length; j++) {
+          const b1 = bodies[i];
+          const b2 = bodies[j];
+
+          const dx = b2.x - b1.x;
+          const dy = b2.y - b1.y;
+          const distSq = dx * dx + dy * dy;
+          const dist = Math.sqrt(distSq);
+
+          if (dist < b1.radius + b2.radius) {
+            if (b1.mass >= b2.mass) {
+              b1.vx = (b1.vx * b1.mass + b2.vx * b2.mass) / (b1.mass + b2.mass);
+              b1.vy = (b1.vy * b1.mass + b2.vy * b2.mass) / (b1.mass + b2.mass);
+              b1.mass += b2.mass;
+              if (b1.type !== 'blackhole') {
+                b1.radius = Math.min(55, Math.sqrt(b1.radius * b1.radius + b2.radius * b2.radius * 0.5));
+              }
+              bodies.splice(j, 1);
+              j--;
+              continue;
+            } else {
+              b2.vx = (b1.vx * b1.mass + b2.vx * b2.mass) / (b1.mass + b2.mass);
+              b2.vy = (b1.vy * b1.mass + b2.vy * b2.mass) / (b1.mass + b2.mass);
+              b2.mass += b1.mass;
+              if (b2.type !== 'blackhole') {
+                b2.radius = Math.min(55, Math.sqrt(b2.radius * b2.radius + b1.radius * b1.radius * 0.5));
+              }
+              bodies.splice(i, 1);
+              i--;
+              break;
+            }
+          }
+
+          const force = (G * b1.mass * b2.mass) / Math.max(distSq, 450);
+          const fx = (force * dx) / dist;
+          const fy = (force * dy) / dist;
+
+          b1.vx += fx / b1.mass;
+          b1.vy += fy / b1.mass;
+          b2.vx -= fx / b2.mass;
+          b2.vy -= fy / b2.mass;
+        }
+      }
+
+      for (let body of bodies) {
+        body.update();
+        body.draw();
+      }
+
+      // Линия прицеливания при запуске объекта
+      if (isDraggingSpawn) {
+        ctx.beginPath();
+        ctx.moveTo(dragStartWorld.x, dragStartWorld.y);
+        ctx.lineTo(dragCurrentWorld.x, dragCurrentWorld.y);
+        ctx.strokeStyle = '#ffffff';
+        ctx.setLineDash([6 / camera.zoom, 6 / camera.zoom]);
+        ctx.lineWidth = 2 / camera.zoom;
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        let previewR = spawnMode === 'star' ? 24 : (spawnMode === 'blackhole' ? 18 : 7);
+        let previewColor = spawnMode === 'star' ? '#ffb86c' : (spawnMode === 'blackhole' ? '#bd93f9' : '#8be9fd');
+        ctx.beginPath();
+        ctx.arc(dragStartWorld.x, dragStartWorld.y, previewR, 0, Math.PI * 2);
+        ctx.fillStyle = previewColor;
+        ctx.fill();
+      }
+
+      ctx.restore();
+      requestAnimationFrame(animate);
+    }
+
+    window.addEventListener('resize', () => {
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      generateBgStars();
+    });
+
+    generateBgStars();
+    initSystem();
+    animate();
+  </script>
+</body>
+</html>
